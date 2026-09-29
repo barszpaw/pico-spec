@@ -595,6 +595,7 @@ static const char *MENU_ESX_EJECT[2]     = { "Eject disk\n",     "Expulsar disco
     "Options\t>\n"\
     "Debug\t>\n"\
     MENU_MAIN_HARDWARE_ITEM \
+    MENU_MAIN_NETWORK_ITEM \
     "ZX Keyboard\n"\
     "Help\n"\
     "About\n"\
@@ -609,6 +610,7 @@ static const char *MENU_ESX_EJECT[2]     = { "Eject disk\n",     "Expulsar disco
     "Opciones\t>\n"\
 	"Depurar\t>\n"\
     MENU_MAIN_HARDWARE_ITEM \
+    MENU_MAIN_NETWORK_ITEM \
     "Teclado ZX\n"\
     "Ayuda\n"\
     "Acerca de\n"\

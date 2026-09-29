@@ -7911,11 +7911,11 @@ void OSD::do_OSD(fabgl::VirtualKey KeytoESP, bool ALT, bool CTRL) {
                 return;
             }
 #if TFT
-            // TFT: RP2350 opt 13; RP2040-TFT opt 12 (Hardware removed, no Network row).
+            // TFT: RP2350 opt 14 (after Network); RP2040-TFT opt 12 (no Hardware/Network rows).
 #if PICO_RP2040
             else if (FileUtils::fsMount && opt == 12) { // TFT
 #else
-            else if (FileUtils::fsMount && opt == 13) { // TFT
+            else if (FileUtils::fsMount && opt == 14) { // TFT
 #endif
                 menu_saverect = true;
                 menu_curopt = 1;
