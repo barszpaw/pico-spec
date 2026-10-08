@@ -2179,9 +2179,24 @@ IRAM_ATTR void Ports::output(uint16_t address, uint8_t data) {
     // Skip when TR-DOS is active — port 0xFF is the Beta-128 system register
     if (Config::timex_video && !ESPectrum::trdos && a8 == 0xFF && !(address & 0x0100)) {
       LED::touchW(LED::TIMEX);
+      const uint8_t prev_mode = VIDEO::timex_mode;
+      const uint8_t prev_ink  = VIDEO::timex_hires_ink;
       VIDEO::timex_port_ff = data & 0x3F;
       VIDEO::timex_mode = data & 0x07;
       VIDEO::timex_hires_ink = (data >> 3) & 0x07;
+      // Hi-res (mode 6) renders through the packed-pair framebuffer; the driver's
+      // colour tables may only be rewritten in vblank, so request and let
+      // VIDEO::EndFrame apply (the DS80 rule).
+      if ((VIDEO::timex_mode == 6) != (prev_mode == 6))
+          VIDEO::timexHiresRequest(VIDEO::timex_mode == 6);
+      else if (VIDEO::timex_hires_ink != prev_ink && VIDEO::timex_hires_live) {
+          // Colour change inside hi-res is beam-exact and costs no driver
+          // rewrite (see VIDEO::timexHiresColour) — flush paper and border up
+          // to this T-state in the old pair first, the way OUT (#FE) does.
+          VIDEO::Draw(0, false);
+          VIDEO::DrawBorder();
+          VIDEO::timexHiresColour();
+      }
       ioContentionLate(MemESP::ramContended[rambank]);
       return;
     }

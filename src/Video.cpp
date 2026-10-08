@@ -265,6 +265,7 @@ static inline void profi_ds80_driver_set(bool active, const uint32_t *palette16,
     (void)active; (void)palette16; (void)pair_lut;
 #endif
 }
+
 #endif
 
 // OSD palette override for DS80.  The Graphics-layer ZX→DS80 colour remap
@@ -474,6 +475,9 @@ static void Select_Update_Border(); // forward declaration
 uint8_t VIDEO::timex_port_ff = 0;
 uint8_t VIDEO::timex_mode = 0;
 uint8_t VIDEO::timex_hires_ink = 0;
+volatile bool VIDEO::timex_hires_live = false;
+volatile bool VIDEO::timex_hires_pending_on = false;
+volatile bool VIDEO::timex_hires_pending_off = false;
 
 #endif
 
@@ -769,6 +773,17 @@ void precalcborder32()
 
 void VIDEO::updateBorderBrd() {
 #if !PICO_RP2040
+    if (timex_hires_live) {
+        // Hi-res border = the PAPER colour, bright, as a solid pair slot (real
+        // SCLD/Fuse behaviour — confirmed by Pawel noticing our black border
+        // didn't match the reference). A T-state covers the same number of fb
+        // bytes in either mode, only their meaning changes, so the existing
+        // border machines need nothing else.
+        uint8_t pi = (uint8_t)((~timex_hires_ink & 7) | 8);
+        uint8_t b = profi_pair_lookup[pi][pi];
+        brd = (uint32_t)b * 0x01010101u;
+        return;
+    }
     if (isProfiDS80()) {
         // DS80 border colour = Palette[(~borderIndex) & 7] (inverse index, per
         // ZXMAK2 ProfiRenderer m_borderColorPaper), mapped to its solid pair slot.
@@ -1013,6 +1028,7 @@ static void initDefaultPalette() {
     buildSpectrumRGB(builtin_palette_defs[0], spectrum_rgb888);
 }
 
+
 #if !PICO_RP2040
 void initGigascreenBlendLUT();
 #endif
@@ -1089,6 +1105,162 @@ void VIDEO::regenerateUlaPlusAluBytes() {
         AluByte[n] = (unsigned int*)AluBytesUlaPlus_flash[n];
 
     graphics_set_dither(Config::hdmi_dither);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timex SCLD hi-res mode 6 (512x192, real resolution) — ported from pico-speccy.
+//
+// Real SCLD alternates byte-columns from screen bank 0 and bank 1 at the same
+// address (64 cols x 8 bits x 2 banks = 512 pixels), always 2-colour: one global
+// "ink" (port #FF bits 3-5) on its own bright complement as "paper" — matching
+// real hardware and Fuse (confirmed on PortFF.tap: ink=blue -> paper=bright
+// yellow, not black — an earlier OR-merge/pair-encoding attempt here got this
+// wrong and used plain black paper).
+//
+// Renders through the SAME packed-pair driver infrastructure as Profi DS80
+// (profi_pair_lookup / profi_ds80_driver_set / Graphics8BitPalette::ds80_active):
+// one framebuffer byte already decodes to two independent physical pixels via
+// the driver's conv_color/palette_vga16 tables, so no new reserved indices or
+// driver code are needed — just a 16-entry nibble LUT selecting two of the
+// existing 250 pair slots per nibble.
+//
+// ON/OFF transitions rewrite that shared driver state, which the HDMI/VGA DMA
+// reads in real time — exactly the DS80 hazard already solved by deferring to
+// EndFrame() (vblank-safe). Ports.cpp only requests (timex_hires_pending_on/off);
+// EndFrame() applies. An in-mode ink-only change does NOT need a driver rewrite
+// (see timexHiresColour) and is safe mid-frame, same as DS80's border colour.
+#if !PICO_RP2040
+static uint16_t timex_hr_lut[16];
+
+uint8_t VIDEO::timexHiresInk()   { return (uint8_t)((timex_hires_ink & 7) | 8); }
+uint8_t VIDEO::timexHiresPaper() { return (uint8_t)((~timex_hires_ink & 7) | 8); }
+
+static void timexHiresBuildLut() {
+    const uint8_t ink = VIDEO::timexHiresInk(), pap = VIDEO::timexHiresPaper();
+    for (int n = 0; n < 16; n++) {
+        uint8_t c3 = (n & 8) ? ink : pap, c2 = (n & 4) ? ink : pap;
+        uint8_t c1 = (n & 2) ? ink : pap, c0 = (n & 1) ? ink : pap;
+        timex_hr_lut[n] = (uint16_t)(VIDEO::profi_pair_lookup[c3][c2]
+                        | ((uint16_t)VIDEO::profi_pair_lookup[c1][c0] << 8));
+    }
+}
+
+// The 16 pair-slot colours are the machine's own ZX palette (preset/CRT
+// transform included, via paletteTransform) — same two stages the standard
+// path gets.
+static void timexHiresDriverPalette() {
+    uint32_t pal[16];
+    for (int i = 0; i < 16; i++) pal[i] = paletteTransform(spectrum_rgb888[i]) & 0x00FFFFFF;
+    profi_ds80_driver_set(true, pal, &VIDEO::profi_pair_lookup[0][0]);
+}
+#endif
+
+void VIDEO::timexHiresRequest(bool on) {
+#if !PICO_RP2040
+    if (on) {
+        if (timex_hires_live) { timex_hires_pending_off = false; return; }
+        timex_hires_pending_on = true;
+        timex_hires_pending_off = false;
+    } else {
+        if (!timex_hires_live) { timex_hires_pending_on = false; return; }
+        timex_hires_pending_off = true;
+        timex_hires_pending_on = false;
+    }
+#else
+    (void)on;
+#endif
+}
+
+// Port #FF bits 3-5 changed while already in hi-res: the 16 pair colours are
+// the fixed ZX palette and the ink field only picks two of them, so all that
+// moves is the 16-entry LUT and the border byte — beam-exact and legal
+// mid-frame (no driver/conv_color rewrite, which would have to wait for
+// vblank and would tear if it did not).
+void VIDEO::timexHiresColour() {
+#if !PICO_RP2040
+    if (!timex_hires_live) return;
+    timexHiresBuildLut();
+    updateBorderBrd();
+    brdChange = true;
+#endif
+}
+
+// The ZX palette itself was rebuilt (preset change, CRT filter): everything
+// timexHiresColour does, plus the driver's 250 pair slots. Callers are all
+// vblank-or-full-rebuild contexts — never the port handler.
+void VIDEO::timexHiresRefresh() {
+#if !PICO_RP2040
+    if (!timex_hires_live) return;
+    timexHiresBuildLut();
+    timexHiresDriverPalette();
+    updateBorderBrd();
+    brdChange = brdnextframe = true;
+#endif
+}
+
+void VIDEO::timexHiresApplyPending() {
+#if !PICO_RP2040
+    if (timex_hires_pending_on) {
+        timex_hires_pending_on = false;
+        if (timex_hires_live) return;
+        // pair_lookup also depends on whether HDMI audio owns its Data Island
+        // slots, so rebuild on every activation is the cheap way to stay in step.
+        init_profi_pair_lookup();
+        timexHiresBuildLut();
+        timexHiresDriverPalette();
+        // SOFTTV/TFT builds have no pair driver at all (profi_ds80_driver_set is
+        // a stub) and hdmi_set_profi_ds80_mode itself refuses when its snapshot
+        // will not allocate. Either way: stay in the 256px OR-merge fallback
+        // rather than render pair slots nothing decodes.
+        if (!profi_ds80_active) {
+            Debug::log("[TIMEX] hi-res: no packed-pair mode here, using 256px fallback");
+            return;
+        }
+        rebuildDS80ColorLut();
+        Graphics8BitPalette::ds80_active = true;
+        timex_hires_live = true;
+        // Every byte on screen now decodes as a pair slot — clear and let the
+        // border machine repaint authoritatively.
+        if (vga.frameBuffer) {
+            for (int _y = 0; _y < (int)vga.yres; _y++)
+                if (vga.frameBuffer[_y]) memset(vga.frameBuffer[_y], 0, vga.xres);
+        }
+        updateBorderBrd();
+        brdChange = brdnextframe = true;
+        Debug::log("[TIMEX] hi-res 512x192 on (ink=%u paper=%u)",
+                   (unsigned)timexHiresInk(), (unsigned)timexHiresPaper());
+    } else if (timex_hires_pending_off) {
+        timex_hires_pending_off = false;
+        if (!timex_hires_live) return;
+        timex_hires_live = false;
+        profi_ds80_driver_set(false, nullptr, nullptr);
+        Graphics8BitPalette::ds80_active = false;
+        if (vga.frameBuffer) {
+            for (int _y = 0; _y < (int)vga.yres; _y++)
+                if (vga.frameBuffer[_y]) memset(vga.frameBuffer[_y], 0, vga.xres);
+        }
+        updateBorderBrd();
+        brdChange = brdnextframe = true;
+        Debug::log("[TIMEX] hi-res 512x192 off");
+    }
+#endif
+}
+
+// Machine reset / the mode is gone while the deferred path cannot see the
+// edge (VIDEO::Reset rebuilds the standard driver tables under us).
+void VIDEO::timexHiresForceOff() {
+#if !PICO_RP2040
+    timex_hires_pending_on = timex_hires_pending_off = false;
+    if (!timex_hires_live) return;
+    timex_hires_live = false;
+    profi_ds80_driver_set(false, nullptr, nullptr);
+    Graphics8BitPalette::ds80_active = false;
+    if (vga.frameBuffer) {
+        for (int _y = 0; _y < (int)vga.yres; _y++)
+            if (vga.frameBuffer[_y]) memset(vga.frameBuffer[_y], 0, vga.xres);
+    }
+    Debug::log("[RESET] Timex hi-res off + FB cleared");
+#endif
 }
 
 // Fast path: update single palette entry without rebuilding AluBytes
@@ -2477,6 +2649,11 @@ void VIDEO::Reset() {
             }
         }
     }
+
+    // Timex hi-res: same reset-time hard cleanup as DS80 above — EndFrame
+    // rebuilds the standard driver tables under us, so a pending/live hi-res
+    // request from before the reset can't be left dangling.
+    timexHiresForceOff();
 #endif
 }
 
@@ -2827,12 +3004,39 @@ IRAM_ATTR void VIDEO::MainScreen(unsigned int statestoadd, bool contended) {
     }
 
 #if !PICO_RP2040
-    if (Config::timex_video && VIDEO::timex_mode == 6) {
-        // Hi-res mode 6 (512->256): real SCLD alternates byte-columns from
-        // screen0 and screen1 at same address, 64 cols x 8 bits = 512 pixels.
-        // For 256px output, OR-merge each pair (s0[addr] | s1[addr]) into
-        // 8 output pixels — preserves all set bits, covers all 32 addresses.
-        uint8_t hires_att = VIDEO::timex_hires_ink;
+    if (VIDEO::timex_hires_live) {
+        // Timex SCLD hi-res 512x192, native (ported from pico-speccy, 2026-10-07)
+        // — packed pair slots via the Profi DS80 driver infrastructure, 8 fb
+        // bytes per 4T column, exactly the DS80 shape. Screen 0 supplies the
+        // LEFT byte of each column pair, screen 1 (+0x2000) the right one;
+        // attributes are unused and both colours (ink + its bright complement)
+        // are baked into timex_hr_lut by timexHiresBuildLut().
+        //
+        // The source address is derived from the column counter, NOT from the
+        // running bmpOffset/attOffset MainScreen_Blank sets up: the guest can
+        // leave mode 6 mid-frame, which flips those two back to the standard
+        // bitmap/attribute pair a frame before timex_hires_live drops — and
+        // while it is up, the framebuffer IS packed pairs, so hi-res is the
+        // only self-consistent thing to render into it.
+        const unsigned int end_col = coldraw_cnt < 32u ? coldraw_cnt : 32u;
+        const uint16_t base = offBmp[curline];
+        for (unsigned int j = end_col - loopCount; j < end_col; j++) {
+            uint8_t e = grmem[base + j];            // screen 0 -> pixels 0..7
+            uint8_t o = grmem[base + j + 0x2000];   // screen 1 -> pixels 8..15
+            *lineptr32++ = (uint32_t)timex_hr_lut[e & 0x0F]
+                         | ((uint32_t)timex_hr_lut[e >> 4] << 16);
+            *lineptr32++ = (uint32_t)timex_hr_lut[o & 0x0F]
+                         | ((uint32_t)timex_hr_lut[o >> 4] << 16);
+        }
+    } else if (Config::timex_video && VIDEO::timex_mode == 6) {
+        // Hi-res fallback for builds/boards with no packed-pair driver (SOFTTV,
+        // TFT, or a refused DS80 snapshot allocation): 512->256 by OR-merging
+        // each screen0/screen1 byte pair — preserves every set bit at half the
+        // horizontal resolution. Colours are the real ones (bright ink on its
+        // bright complement) — an earlier version of this fallback left paper
+        // black and nothing bright, which real hardware/Fuse does not do.
+        uint8_t hires_att = (uint8_t)(0x40 | ((~VIDEO::timex_hires_ink & 7) << 3)
+                                           | (VIDEO::timex_hires_ink & 7));
         for (; loopCount--; ) {
             uint8_t combined = grmem[bmpOffset++] | grmem[attOffset++];
             *lineptr32++ = AluByte[combined >> 4][hires_att];
@@ -3397,6 +3601,9 @@ IRAM_ATTR void VIDEO::EndFrame() {
             brdChange = true;           // schedule full border repaint next frame
         }
     }
+
+    // ── Timex hi-res 512x192 packed-pair switch — same vblank-only rule as DS80 ──
+    if (timex_hires_pending_on || timex_hires_pending_off) timexHiresApplyPending();
 
     // Profi palette refresh. EndFrame is NOT in the display blanking window:
     // ESPectrum_vsync (fired at scanout line v_active) only STARTS the frame's

@@ -107,6 +107,7 @@ public:
     static uint16_t cpu_mhz;   // 252, 378 (RP2040/RP2350), 504 (RP2350 only)
     static uint16_t max_flash_freq; // MHz, default 66
     static uint16_t max_psram_freq; // MHz, default 166
+    static uint8_t  psram_disabled; // 0=use butter PSRAM normally, 1=force butter_psram_size()==0 (needs reboot)
     static uint16_t max_tft_freq;   // MHz, default 126
 #if !PICO_RP2040
     static uint8_t  vreq_voltage;  // vreg_voltage_t enum value, default VREG_VOLTAGE_1_60
@@ -294,7 +295,7 @@ public:
     static void loadWifiConfig();
     static void saveWifiConfig();
 
-    // Saved FTP/SFTP connections (Network → F5 → Remote). Stored in
+    // Saved FTP/SFTP/Gopher connections (Network → F5 → Remote). Stored in
     // CONFIG_DIR/remotes.tsv, one tab-separated line per connection:
     //   proto \t host \t port \t user \t savepass \t pass \t alias \t path
     // The password is only written when savepass=1 (else re-prompted at connect). `alias`
@@ -304,7 +305,7 @@ public:
     struct Remote {
         string   host, user, pass, alias, path;
         uint16_t port;
-        uint8_t  proto;     // 0 = FTP, 1 = SFTP
+        uint8_t  proto;     // 0 = FTP, 1 = SFTP, 2 = Gopher (no auth — user/pass/savepass unused)
         bool     savepass;
     };
     static const int MAX_REMOTES = 16;

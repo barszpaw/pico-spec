@@ -993,6 +993,12 @@ uint32_t __not_in_flash_func(butter_psram_size)() {
 #if BUTTER_PSRAM_GPIO == 255
     return 0;   // PSRAM disabled via CMake kill-switch (set(PSRAM OFF))
 #else
+    // User-facing Overclock > PSRAM toggle (needs reboot to apply, like the
+    // other Overclock settings). Checked ahead of the cache: Config isn't
+    // loaded yet the first few times this runs in main() before
+    // ESPectrum::setup(), so early boot logging still reports the true
+    // detected size; this only forces "no PSRAM" from Config::load() onward.
+    if (Config::psram_disabled) return 0;
     if (BUTTER_PSRAM_SIZE != -1) return BUTTER_PSRAM_SIZE;
     for(register int i = MB8; i < MB16; i += 4096)
         PSRAM_DATA[i] = 16;

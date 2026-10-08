@@ -363,6 +363,21 @@ public:
   static uint8_t timex_port_ff;   // bits 0-5 of port 0xFF
   static uint8_t timex_mode;      // cached (timex_port_ff & 7)
   static uint8_t timex_hires_ink; // mode 6: ink palette index (0-7)
+
+  // Hi-res mode 6 (512x192, real resolution via the DS80 packed-pair driver).
+  // timex_hires_live is the frame-wide "currently rendering packed pairs" state;
+  // ON/OFF transitions are deferred to EndFrame (vblank-safe, same rule as DS80)
+  // via the pending flags — Ports.cpp only requests, never flips live directly.
+  static volatile bool timex_hires_live;
+  static volatile bool timex_hires_pending_on;
+  static volatile bool timex_hires_pending_off;
+  static uint8_t timexHiresInk();   // bright version of timex_hires_ink
+  static uint8_t timexHiresPaper(); // bright complement of timexHiresInk()
+  static void timexHiresRequest(bool on);   // Ports.cpp: mode 6 entered/left
+  static void timexHiresColour();           // Ports.cpp: ink changed while live (beam-exact, no driver rewrite)
+  static void timexHiresRefresh();          // palette preset/CRT-filter change while live
+  static void timexHiresApplyPending();     // EndFrame: apply a pending on/off request
+  static void timexHiresForceOff();         // Reset(): hard-clear without the deferred dance
 #endif
 
   // ULA+

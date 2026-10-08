@@ -51,6 +51,7 @@ string   Config::midi_bank = "";
 uint16_t Config::cpu_mhz = CPU_MHZ;
 uint16_t Config::max_flash_freq = 66;
 uint16_t Config::max_psram_freq = 166;
+uint8_t  Config::psram_disabled = 0;
 uint16_t Config::max_tft_freq = 126;
 #if !PICO_RP2040
 uint8_t  Config::vreq_voltage = VREG_VOLTAGE_1_60;
@@ -662,7 +663,7 @@ int Config::loadRemotes(Remote* out, int cap) {
         for (char ch : line) { if (ch == '\t') { if (fi < 7) ++fi; } else fld[fi] += ch; }
         if (fi >= 4 && n < cap) {            // need proto..savepass present
             Remote& r = out[n];
-            r.proto    = (fld[0] == "sftp") ? 1 : 0;
+            r.proto    = (fld[0] == "sftp") ? 1 : (fld[0] == "gopher") ? 2 : 0;
             r.host     = fld[1];
             r.port     = (uint16_t)atoi(fld[2].c_str());
             r.user     = fld[3];
@@ -692,7 +693,8 @@ void Config::saveRemotes(const Remote* list, int count) {
         const Remote& r = list[i];
         static char buf[512];   // off the stack — saveRemotes also runs deep under do_OSD
         int n = snprintf(buf, sizeof(buf), "%s\t%s\t%u\t%s\t%d\t%s\t%s\t%s\n",
-                         r.proto ? "sftp" : "ftp", r.host.c_str(), (unsigned)r.port,
+                         r.proto == 1 ? "sftp" : r.proto == 2 ? "gopher" : "ftp",
+                         r.host.c_str(), (unsigned)r.port,
                          r.user.c_str(), r.savepass ? 1 : 0,
                          r.savepass ? r.pass.c_str() : "", r.alias.c_str(), r.path.c_str());
         UINT bw; if (n > 0) f_write(f, buf, (UINT)n, &bw);
@@ -805,6 +807,7 @@ void Config::load() {
         if (max_flash_freq == 0) max_flash_freq = 66;
         nvs_get_u16("max_psram_freq", max_psram_freq, sts);
         if (max_psram_freq == 0) max_psram_freq = 166;
+        nvs_get_u8("psram_disabled", psram_disabled, sts);
         nvs_get_u16("max_tft_freq", max_tft_freq, sts);
         if (max_tft_freq == 0) max_tft_freq = 126;
         graphics_max_tft_freq_mhz = max_tft_freq;
@@ -1163,6 +1166,7 @@ void Config::save(const char* path) {
     nvs_set_u16(buf,"cpu_mhz", cpu_mhz);
     nvs_set_u16(buf,"max_flash_freq", max_flash_freq);
     nvs_set_u16(buf,"max_psram_freq", max_psram_freq);
+    nvs_set_u8(buf,"psram_disabled", psram_disabled);
     nvs_set_u16(buf,"max_tft_freq", max_tft_freq);
 #if !PICO_RP2040
     {

@@ -1066,7 +1066,8 @@ static const char *MENU_RTC[2]       = { "RTC + NVRAM\n",    "RTC + NVRAM\n" };
     "Emulator Info\n"\
     "HID devices\n"\
     "Speed Test\t>\n"\
-    "Overclock (!)\t>\n"
+    "Overclock (!)\t>\n"\
+    "PSRAM\t>\n"
 #define MENU_HARDWARE_ES \
     "Hardware\n"\
     "Chip Info\n"\
@@ -1075,7 +1076,8 @@ static const char *MENU_RTC[2]       = { "RTC + NVRAM\n",    "RTC + NVRAM\n" };
     "Info emulador\n"\
     "Disp. HID\n"\
     "Test velocidad\t>\n"\
-    "Overclock (!)\t>\n"
+    "Overclock (!)\t>\n"\
+    "PSRAM\t>\n"
 static const char *MENU_HARDWARE[2] = { MENU_HARDWARE_EN, MENU_HARDWARE_ES };
 
 // NET row (HTTPS download benchmark) only exists where the net client is built.
@@ -1149,6 +1151,15 @@ static const char *MENU_OVERCLOCK[2] = { MENU_OVERCLOCK_EN, MENU_OVERCLOCK_ES };
     "[C] 100 MHz\n"\
     "[D] 133 MHz\n"\
     "[E] 166 MHz\n"
+
+// Experimental: force butter_psram_size()==0 as if no PSRAM chip were
+// present, for A/B testing features that branch on it (e.g. the Video.cpp
+// screen-backup-to-PSRAM path). Needs reboot to apply, like the siblings
+// above.
+#define MENU_PSRAM_ENABLE \
+    "PSRAM\n"\
+    "[A] Off\n"\
+    "[B] On\n"
 
 #if !PICO_RP2040
 #define MENU_VREG_VOLTAGE \
@@ -2447,7 +2458,7 @@ static const char *MSG_BUDGET_INSUFFICIENT[2]= { "Not enough freed - pick more",
                                                  "Insuficiente - elija mas" };
 
 // ─── File transfer (FTP/SFTP) client strings ────────────────────────────────
-static const char *MENU_NET_PROTO[2]         = { "Protocol\nFTP\nSFTP\n", "Protocolo\nFTP\nSFTP\n" };
+static const char *MENU_NET_PROTO[2]         = { "Protocol\nFTP\nSFTP\nGopher\n", "Protocolo\nFTP\nSFTP\nGopher\n" };
 static const char *MSG_NET_FT_NOWIFI[2]      = { "Connect Wi-Fi first", "Conecte Wi-Fi primero" };
 static const char *MSG_NET_HOST_LABEL[2]     = { "Host:",   "Host:"     };
 static const char *MSG_NET_USER_LABEL[2]     = { "User:",   "Usuario:"  };

@@ -81,6 +81,7 @@ visit https://zxespectrum.speccy.org/contacto
 #include "RemoteFs.h"
 #include "Ftp.h"
 #include "Sftp.h"
+#include "Gopher.h"
 #include "Ssh.h"
 #include "HttpCatalogFs.h"
 #include "HttpsGet.h"
@@ -702,6 +703,10 @@ static void netSessionRun(void* p) {
         Ftp* ftp = new Ftp();
         if (ftp->connect(c->host.c_str(), c->port, c->user.c_str(), c->pass.c_str())) fs = ftp;
         else delete ftp;
+    } else if (c->proto == 2) {
+        Gopher* gopher = new Gopher();
+        if (gopher->connect(c->host.c_str(), c->port, nullptr, nullptr)) fs = gopher;
+        else delete gopher;
     } else {
         g_net_host_for_cb = c->host;
         Ssh::setHostKeyCb(netHostKeyCb);
@@ -758,7 +763,7 @@ static inline uint8_t* netAltStackAlloc(size_t& stksz) {
 // crypto/listing path can't live on the 4 KB core stack.
 static void netConnectRemote(const Config::Remote& r, const string& restorePath = "") {
     string pass = r.pass;
-    if (!r.savepass) {
+    if (!r.savepass && r.proto != 2) { // Gopher (proto 2) has no authentication — never prompt
         pass = netAskField(MSG_NET_PASS_LABEL[Config::lang], "", true); // masked
         if (pass == "\x1B") return;
     }
@@ -801,29 +806,35 @@ static void addRemoteForm() {
     if (!ZiFiAT::getStatus(ssid, ip)) { OSD::osdCenteredMsg(MSG_NET_FT_NOWIFI[Config::lang], LEVEL_WARN, 2200); return; }
 
     OSD::menu_level = 2; OSD::menu_saverect = true; OSD::menu_curopt = Config::net_proto + 1;
-    uint8_t proto = OSD::menuRun(MENU_NET_PROTO[Config::lang]); // 1=FTP, 2=SFTP
+    uint8_t proto = OSD::menuRun(MENU_NET_PROTO[Config::lang]); // 1=FTP, 2=SFTP, 3=Gopher
     if (proto == 0) return;
     VIDEO::SaveRect.restore_last();
     uint8_t pr = proto - 1;
+    bool isGopher = (pr == 2);
 
     // Field order: Host → Port → User → Pass (→ save-password → Alias below).
+    // Gopher has no authentication — skip straight from Port to the optional path/alias.
     string host = netAskField(MSG_NET_HOST_LABEL[Config::lang], Config::net_host);
     if (host == "\x1B" || host.empty()) return;
-    uint16_t defport = pr ? 22 : 21;
+    uint16_t defport = isGopher ? 70 : (pr ? 22 : 21);
     char pbuf[8]; snprintf(pbuf, sizeof(pbuf), "%u", Config::net_port ? Config::net_port : defport);
     string ports = netAskField(MSG_NET_PORT_LABEL[Config::lang], pbuf);
     if (ports == "\x1B") return;
     uint16_t port = (uint16_t)atoi(ports.c_str()); if (!port) port = defport;
-    string user = netAskField(MSG_NET_USER_LABEL[Config::lang], Config::net_user);
-    if (user == "\x1B") return;
-    string pass = netAskField(MSG_NET_PASS_LABEL[Config::lang], "", true); // masked
-    if (pass == "\x1B") return;
+    string user, pass;
+    bool savepass = false;
+    if (!isGopher) {
+        user = netAskField(MSG_NET_USER_LABEL[Config::lang], Config::net_user);
+        if (user == "\x1B") return;
+        pass = netAskField(MSG_NET_PASS_LABEL[Config::lang], "", true); // masked
+        if (pass == "\x1B") return;
 
-    OSD::menu_level = 2; OSD::menu_saverect = true; OSD::menu_curopt = 1;
-    uint8_t sp = OSD::menuRun(MENU_REMOTE_SAVEPASS[Config::lang]); // 1=No, 2=Yes
-    if (sp == 0) return;
-    VIDEO::SaveRect.restore_last();
-    bool savepass = (sp == 2);
+        OSD::menu_level = 2; OSD::menu_saverect = true; OSD::menu_curopt = 1;
+        uint8_t sp = OSD::menuRun(MENU_REMOTE_SAVEPASS[Config::lang]); // 1=No, 2=Yes
+        if (sp == 0) return;
+        VIDEO::SaveRect.restore_last();
+        savepass = (sp == 2);
+    }
 
     // Optional start directory, then display name — Enter to leave empty, Esc cancels.
     string path = netAskField(MSG_REMOTE_PATH_LABEL[Config::lang], "");
@@ -863,9 +874,14 @@ static void remoteHostsBrowse() {
                 rows.push_back(g_remotes[i].alias);
             } else {
                 char b[96];
-                snprintf(b, sizeof(b), "%s@%s:%u (%s)", g_remotes[i].user.c_str(),
-                         g_remotes[i].host.c_str(), (unsigned)g_remotes[i].port,
-                         g_remotes[i].proto ? "sftp" : "ftp");
+                if (g_remotes[i].proto == 2) {        // gopher: no user, no auth
+                    snprintf(b, sizeof(b), "%s:%u (gopher)",
+                             g_remotes[i].host.c_str(), (unsigned)g_remotes[i].port);
+                } else {
+                    snprintf(b, sizeof(b), "%s@%s:%u (%s)", g_remotes[i].user.c_str(),
+                             g_remotes[i].host.c_str(), (unsigned)g_remotes[i].port,
+                             g_remotes[i].proto ? "sftp" : "ftp");
+                }
                 rows.push_back(b);                    // rows 1..n: a plain row (no <DIR>)
             }
         }
@@ -7228,6 +7244,39 @@ void OSD::do_OSD(fabgl::VirtualKey KeytoESP, bool ALT, bool CTRL) {
                         OSD::SpeedTest();
                         menu_curopt = 6;
                         menu_saverect = false;
+                    }
+                    else if (hw_opt == 8) {
+                        // PSRAM on/off — experimental A/B toggle for features that branch
+                        // on butter_psram_size() (e.g. the Video.cpp screen-backup path).
+                        // Needs reboot to apply, like Overclock's settings.
+                        menu_level = 2;
+                        menu_curopt = 1;
+                        menu_saverect = true;
+                        while (1) {
+                            string pe_menu = MENU_PSRAM_ENABLE;
+                            uint8_t cur = Config::psram_disabled;
+                            pe_menu.replace(pe_menu.find("[A"), 2, cur != 0 ? "[*" : "[ ");
+                            pe_menu.replace(pe_menu.find("[B"), 2, cur == 0 ? "[*" : "[ ");
+                            uint8_t opt2 = menuRun(pe_menu);
+                            if (opt2 == 1 || opt2 == 2) {
+                                uint8_t new_v = (opt2 == 1) ? 1 : 0;
+                                if (new_v != cur) {
+                                    Config::psram_disabled = new_v;
+                                    if (confirmReboot(OSD_DLG_APPLYREBOOT)) {
+                                        Config::save();
+                                        esp_hard_reset();
+                                    } else {
+                                        Config::psram_disabled = cur;
+                                    }
+                                }
+                                menu_curopt = opt2;
+                                menu_saverect = false;
+                            } else {
+                                menu_curopt = 8;
+                                menu_level = 1;
+                                break;
+                            }
+                        }
                     }
                     else {
                         menu_curopt = 9;

@@ -71,6 +71,15 @@ void Debug::log(const char* fmt, ...)
     if (n < 0) return;
     if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
 
+#if ZIFI_TRACE
+    // No debug-UART adapter wired up for this diagnostic session — mirror
+    // to the SD debug.log instead so ZiFi AT-exchange tracing is readable
+    // without extra hardware. Remove once ZiFi debugging is done; this
+    // adds an open/append/close per log line and will flood under a
+    // per-packet trace flood (see dbg_uart_put's comment above).
+    log2SD_impl(std::string(buf, n));
+#endif
+
 #if defined(DBG_UART_ENABLED) && defined(PICO_DEFAULT_UART)
     for (int i = 0; i < n; i++) {
         if (buf[i] == '\n' && !dbg_uart_put('\r')) return; // CRLF for terminals

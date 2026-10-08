@@ -883,9 +883,14 @@ uint8_t __not_in_flash("zifi") ZiFi::unoUartRead(bool dataPort) {
             if (b >= 0) uno_last_rx = (uint8_t)b;
             return uno_last_rx;
         }
-        case 0xC7: { // UART status
-            uint8_t st = rxAvailable() ? 0x01 : 0x00;
-            if (fifo_full(zifi_out_head, zifi_out_tail)) st |= 0x02; // TX_BUSY
+        case 0xC7: { // UART status — real ZX-Uno/divMMC bit layout (confirmed
+                      // against BridgeZX's divmmc.asm, itself based on
+                      // NetChessZX/Spectalk's divmmc_uart.asm): RX ready is
+                      // bit7 (so guest drivers can poll via ADD A,A → CF),
+                      // TX busy is bit6. Not bit0/bit1 — those don't match
+                      // any real-hardware client.
+            uint8_t st = rxAvailable() ? 0x80 : 0x00;        // UART_BYTE_RECEIVED
+            if (fifo_full(zifi_out_head, zifi_out_tail)) st |= 0x40; // UART_BYTE_SENDING
             return st;
         }
         default: return 0xFF; // UART2 / unimplemented registers
