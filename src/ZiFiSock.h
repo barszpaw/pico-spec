@@ -28,6 +28,15 @@ public:
     // Returns a link id (>=0; 0 in single mode) or -1 on failure.
     static int  sock_open(const char* host, uint16_t port, bool tls, uint32_t timeout_ms);
 
+    // Open a fixed-remote UDP "connection" (AT+CIPSTART="UDP",host,port — ESP-AT's
+    // default UDP mode, which only exchanges with that one host:port, exactly what
+    // a client of a single fixed server needs). Same link-id/ring/demux machinery
+    // as TCP: +IPD framing is identical for UDP and TCP in the ESP-AT firmware.
+    // The one real difference: UDP has no peer-initiated CLOSED, so isClosed()/
+    // sock_closed() never go true on their own — callers that need one discrete
+    // datagram per sock_recv (as TNFS does) don't need that signal anyway.
+    static int  sock_open_udp(const char* host, uint16_t port, uint32_t timeout_ms);
+
     // Send exactly len bytes (chunked through AT+CIPSEND). Returns bytes sent, or -1.
     static int  sock_send(int id, const uint8_t* buf, size_t len, uint32_t timeout_ms);
 
@@ -90,6 +99,10 @@ public:
     static const int N_LINKS = 2;
 
 private:
+    // Shared body of sock_open/sock_open_udp: picks a free link (mux mode),
+    // drains its stale ring, issues AT+CIPSTART with the given protocol string.
+    static int  openProto(const char* proto, const char* host, uint16_t port, uint32_t timeout_ms);
+
     static const int RX_SZ = 2048;
     // Tiered (heap when free, else butter PSRAM); alloc in begin()/server_listen(),
     // freed in end()/server_stop() so the 4 KB isn't permanently reserved when the

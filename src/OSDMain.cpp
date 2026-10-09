@@ -82,6 +82,7 @@ visit https://zxespectrum.speccy.org/contacto
 #include "Ftp.h"
 #include "Sftp.h"
 #include "Gopher.h"
+#include "Tnfs.h"
 #include "Ssh.h"
 #include "HttpCatalogFs.h"
 #include "HttpsGet.h"
@@ -707,6 +708,10 @@ static void netSessionRun(void* p) {
         Gopher* gopher = new Gopher();
         if (gopher->connect(c->host.c_str(), c->port, nullptr, nullptr)) fs = gopher;
         else delete gopher;
+    } else if (c->proto == 3) {
+        Tnfs* tnfs = new Tnfs();
+        if (tnfs->connect(c->host.c_str(), c->port, nullptr, nullptr)) fs = tnfs;
+        else delete tnfs;
     } else {
         g_net_host_for_cb = c->host;
         Ssh::setHostKeyCb(netHostKeyCb);
@@ -763,7 +768,7 @@ static inline uint8_t* netAltStackAlloc(size_t& stksz) {
 // crypto/listing path can't live on the 4 KB core stack.
 static void netConnectRemote(const Config::Remote& r, const string& restorePath = "") {
     string pass = r.pass;
-    if (!r.savepass && r.proto != 2) { // Gopher (proto 2) has no authentication — never prompt
+    if (!r.savepass && r.proto != 2 && r.proto != 3) { // Gopher/TNFS have no authentication — never prompt
         pass = netAskField(MSG_NET_PASS_LABEL[Config::lang], "", true); // masked
         if (pass == "\x1B") return;
     }
@@ -806,24 +811,29 @@ static void addRemoteForm() {
     if (!ZiFiAT::getStatus(ssid, ip)) { OSD::osdCenteredMsg(MSG_NET_FT_NOWIFI[Config::lang], LEVEL_WARN, 2200); return; }
 
     OSD::menu_level = 2; OSD::menu_saverect = true; OSD::menu_curopt = Config::net_proto + 1;
-    uint8_t proto = OSD::menuRun(MENU_NET_PROTO[Config::lang]); // 1=FTP, 2=SFTP, 3=Gopher
+    uint8_t proto = OSD::menuRun(MENU_NET_PROTO[Config::lang]); // 1=FTP, 2=SFTP, 3=Gopher, 4=TNFS
     if (proto == 0) return;
     VIDEO::SaveRect.restore_last();
     uint8_t pr = proto - 1;
     bool isGopher = (pr == 2);
+    bool isTnfs = (pr == 3);
 
     // Field order: Host → Port → User → Pass (→ save-password → Alias below).
-    // Gopher has no authentication — skip straight from Port to the optional path/alias.
+    // Gopher/TNFS have no authentication — skip straight from Port to the optional path/alias.
     string host = netAskField(MSG_NET_HOST_LABEL[Config::lang], Config::net_host);
     if (host == "\x1B" || host.empty()) return;
-    uint16_t defport = isGopher ? 70 : (pr ? 22 : 21);
-    char pbuf[8]; snprintf(pbuf, sizeof(pbuf), "%u", Config::net_port ? Config::net_port : defport);
+    uint16_t defport = isGopher ? 70 : isTnfs ? 16384 : (pr ? 22 : 21);
+    // Config::net_port is only a sane prefill when it was saved for THIS SAME
+    // protocol — otherwise it's a leftover from whatever was tested last (e.g.
+    // Gopher's 70 silently reappearing as if it were TNFS's default).
+    uint16_t prevPort = (Config::net_proto == pr) ? Config::net_port : 0;
+    char pbuf[8]; snprintf(pbuf, sizeof(pbuf), "%u", prevPort ? prevPort : defport);
     string ports = netAskField(MSG_NET_PORT_LABEL[Config::lang], pbuf);
     if (ports == "\x1B") return;
     uint16_t port = (uint16_t)atoi(ports.c_str()); if (!port) port = defport;
     string user, pass;
     bool savepass = false;
-    if (!isGopher) {
+    if (!isGopher && !isTnfs) {
         user = netAskField(MSG_NET_USER_LABEL[Config::lang], Config::net_user);
         if (user == "\x1B") return;
         pass = netAskField(MSG_NET_PASS_LABEL[Config::lang], "", true); // masked
@@ -874,9 +884,9 @@ static void remoteHostsBrowse() {
                 rows.push_back(g_remotes[i].alias);
             } else {
                 char b[96];
-                if (g_remotes[i].proto == 2) {        // gopher: no user, no auth
-                    snprintf(b, sizeof(b), "%s:%u (gopher)",
-                             g_remotes[i].host.c_str(), (unsigned)g_remotes[i].port);
+                if (g_remotes[i].proto == 2 || g_remotes[i].proto == 3) { // gopher/tnfs: no user, no auth
+                    snprintf(b, sizeof(b), "%s:%u (%s)", g_remotes[i].host.c_str(),
+                             (unsigned)g_remotes[i].port, g_remotes[i].proto == 2 ? "gopher" : "tnfs");
                 } else {
                     snprintf(b, sizeof(b), "%s@%s:%u (%s)", g_remotes[i].user.c_str(),
                              g_remotes[i].host.c_str(), (unsigned)g_remotes[i].port,

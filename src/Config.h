@@ -305,7 +305,7 @@ public:
     struct Remote {
         string   host, user, pass, alias, path;
         uint16_t port;
-        uint8_t  proto;     // 0 = FTP, 1 = SFTP, 2 = Gopher (no auth — user/pass/savepass unused)
+        uint8_t  proto;     // 0 = FTP, 1 = SFTP, 2 = Gopher, 3 = TNFS (2,3: no auth — user/pass/savepass unused)
         bool     savepass;
     };
     static const int MAX_REMOTES = 16;

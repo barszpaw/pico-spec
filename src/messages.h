@@ -2458,7 +2458,7 @@ static const char *MSG_BUDGET_INSUFFICIENT[2]= { "Not enough freed - pick more",
                                                  "Insuficiente - elija mas" };
 
 // ─── File transfer (FTP/SFTP) client strings ────────────────────────────────
-static const char *MENU_NET_PROTO[2]         = { "Protocol\nFTP\nSFTP\nGopher\n", "Protocolo\nFTP\nSFTP\nGopher\n" };
+static const char *MENU_NET_PROTO[2]         = { "Protocol\nFTP\nSFTP\nGopher\nTNFS\n", "Protocolo\nFTP\nSFTP\nGopher\nTNFS\n" };
 static const char *MSG_NET_FT_NOWIFI[2]      = { "Connect Wi-Fi first", "Conecte Wi-Fi primero" };
 static const char *MSG_NET_HOST_LABEL[2]     = { "Host:",   "Host:"     };
 static const char *MSG_NET_USER_LABEL[2]     = { "User:",   "Usuario:"  };

@@ -215,6 +215,8 @@ void ZiFiSock::pump(uint32_t budget_ms) {
 #if ZIFI_NET_VERBOSE
                     Debug::log("ZiFiSock +IPD link=%d len=%d", ipd_link, ipd_len);
 #endif
+                    Debug::log2SD("ZiFiSock pump: +IPD recognized link=%d len=%d recvdata=%d",
+                                   ipd_link, ipd_len, (int)g_hdr_recvdata);
                     st = (ipd_len > 0) ? ST_IPD_PAYLOAD : ST_SCAN;
                 } else if (b == '\r' || b == '\n') {
                     // Passive mode: "+IPD,<id>,<len>" is a bare data-arrived
@@ -349,6 +351,14 @@ bool ZiFiSock::isClosed(int id) {
 }
 
 int ZiFiSock::sock_open(const char* host, uint16_t port, bool tls, uint32_t timeout_ms) {
+    return openProto(tls ? "SSL" : "TCP", host, port, timeout_ms);
+}
+
+int ZiFiSock::sock_open_udp(const char* host, uint16_t port, uint32_t timeout_ms) {
+    return openProto("UDP", host, port, timeout_ms);
+}
+
+int ZiFiSock::openProto(const char* proto, const char* host, uint16_t port, uint32_t timeout_ms) {
     if (!is_ready) return -1;
     int id = 0;
     if (mux_mode) {
@@ -375,7 +385,6 @@ int ZiFiSock::sock_open(const char* host, uint16_t port, bool tls, uint32_t time
     g_drained[id] = false;
 
     char cmd[160];
-    const char* proto = tls ? "SSL" : "TCP";
     if (mux_mode)
         snprintf(cmd, sizeof(cmd), "AT+CIPSTART=%d,\"%s\",\"%s\",%u", id, proto, host, (unsigned)port);
     else
@@ -383,8 +392,12 @@ int ZiFiSock::sock_open(const char* host, uint16_t port, bool tls, uint32_t time
 
     // Success returns "CONNECT" then "OK"; "ALREADY CONNECTED" counts as open too.
     if (!atCmd(cmd, "OK", timeout_ms)) {
-        if (!strstr(last_line, "ALREADY CONNECT")) return -1;
+        if (!strstr(last_line, "ALREADY CONNECT")) {
+            Debug::log2SD("ZiFiSock::openProto FAILED: %s -> last_line=\"%s\"", cmd, last_line);
+            return -1;
+        }
     }
+    Debug::log2SD("ZiFiSock::openProto OK: %s -> id=%d", cmd, id);
     opened[id] = true;
     return id;
 }

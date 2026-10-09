@@ -663,7 +663,7 @@ int Config::loadRemotes(Remote* out, int cap) {
         for (char ch : line) { if (ch == '\t') { if (fi < 7) ++fi; } else fld[fi] += ch; }
         if (fi >= 4 && n < cap) {            // need proto..savepass present
             Remote& r = out[n];
-            r.proto    = (fld[0] == "sftp") ? 1 : (fld[0] == "gopher") ? 2 : 0;
+            r.proto    = (fld[0] == "sftp") ? 1 : (fld[0] == "gopher") ? 2 : (fld[0] == "tnfs") ? 3 : 0;
             r.host     = fld[1];
             r.port     = (uint16_t)atoi(fld[2].c_str());
             r.user     = fld[3];
@@ -693,7 +693,7 @@ void Config::saveRemotes(const Remote* list, int count) {
         const Remote& r = list[i];
         static char buf[512];   // off the stack — saveRemotes also runs deep under do_OSD
         int n = snprintf(buf, sizeof(buf), "%s\t%s\t%u\t%s\t%d\t%s\t%s\t%s\n",
-                         r.proto == 1 ? "sftp" : r.proto == 2 ? "gopher" : "ftp",
+                         r.proto == 1 ? "sftp" : r.proto == 2 ? "gopher" : r.proto == 3 ? "tnfs" : "ftp",
                          r.host.c_str(), (unsigned)r.port,
                          r.user.c_str(), r.savepass ? 1 : 0,
                          r.savepass ? r.pass.c_str() : "", r.alias.c_str(), r.path.c_str());
